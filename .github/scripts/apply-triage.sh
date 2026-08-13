@@ -15,7 +15,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./triage-labels.sh
+# shellcheck source=./triage-labels.sh disable=SC1091
 source "$SCRIPT_DIR/triage-labels.sh"
 
 STICKY_MARKER='<!-- claude-triage -->'
@@ -40,13 +40,24 @@ diagnosis="$(jq -r '.diagnosis_markdown // ""' "$TRIAGE_FILE")"
 jq -e '(.labels // []) | type == "array"' "$TRIAGE_FILE" >/dev/null \
   || die "labels debe ser un array"
 
+in_array() {
+  local needle="$1"; shift
+  local item
+  for item in "$@"; do [[ "$item" == "$needle" ]] && return 0; done
+  return 1
+}
+
 # --- 2. Filter proposed labels against the closed taxonomy ------------------
 
+# Matched with in_array rather than `triage_label_names | grep -q`: under
+# `pipefail`, grep -q exits at the first match and SIGPIPEs the producer, so the
+# pipeline reports failure on a *successful* match depending on buffering.
+mapfile -t valid_labels < <(triage_label_names)
 mapfile -t proposed < <(jq -r '(.labels // [])[] | select(type == "string")' "$TRIAGE_FILE")
 
 wanted=()
-for label in "${proposed[@]}"; do
-  if triage_label_names | grep -qxF "$label"; then
+for label in "${proposed[@]+"${proposed[@]}"}"; do
+  if in_array "$label" "${valid_labels[@]}"; then
     wanted+=("$label")
   else
     echo "::warning::Claude propuso un label fuera de la taxonomía, descartado: $label"
@@ -56,14 +67,12 @@ echo "Labels aceptados: ${wanted[*]:-(ninguno)}"
 
 # --- 3. Reconcile managed labels, preserving manual ones --------------------
 
-mapfile -t current < <(gh issue view "$ISSUE_NUMBER" --repo "$GH_REPO" --json labels --jq '.labels[].name')
-
-in_array() {
-  local needle="$1"; shift
-  local item
-  for item in "$@"; do [[ "$item" == "$needle" ]] && return 0; done
-  return 1
-}
+# Captured into a variable rather than read through `< <(...)`: a process
+# substitution swallows gh's exit status, so a failed API call would silently
+# look like "the issue has no labels" and we would strip every managed label.
+current_raw="$(gh issue view "$ISSUE_NUMBER" --repo "$GH_REPO" --json labels --jq '.labels[].name')"
+current=()
+[[ -n "$current_raw" ]] && mapfile -t current <<<"$current_raw"
 
 to_add=()
 for label in "${wanted[@]}"; do
@@ -90,8 +99,10 @@ fi
 # --- 4. Upsert the sticky diagnosis comment --------------------------------
 
 run_url="${GITHUB_SERVER_URL:-https://github.com}/${GH_REPO}/actions/runs/${GITHUB_RUN_ID:-0}"
+sha="${GITHUB_SHA:-unknown}"
+# shellcheck disable=SC2016  # the backticks are a literal Markdown code span
 footer=$(printf '\n\n---\n_Diagnóstico generado automáticamente · [run #%s](%s) · commit `%s`_' \
-  "${GITHUB_RUN_NUMBER:-?}" "$run_url" "${GITHUB_SHA:0:7}")
+  "${GITHUB_RUN_NUMBER:-?}" "$run_url" "${sha:0:7}")
 
 body="${STICKY_MARKER}"$'\n'"${diagnosis}${footer}"
 

@@ -7,7 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./triage-labels.sh
+# shellcheck source=./triage-labels.sh disable=SC1091
 source "$SCRIPT_DIR/triage-labels.sh"
 
 for entry in "${TRIAGE_LABELS[@]}"; do

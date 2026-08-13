@@ -22,6 +22,7 @@ TRIAGE_LABELS=(
 
 # Prefixes owned by the triage workflow. Labels matching these are reconciled
 # (added/removed) on every run; anything else on the issue is left untouched.
+# shellcheck disable=SC2034  # consumed by apply-triage.sh, which sources this file
 MANAGED_LABEL_PATTERN='^(type:|priority:|area:|needs-info$)'
 
 triage_label_names() {
