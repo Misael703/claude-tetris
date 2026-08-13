@@ -41,7 +41,23 @@ const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 const themeToggle = document.getElementById('theme-toggle');
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
+let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval;
+
+// Single source of truth for "is a frame scheduled?" — null means the loop is stopped.
+// Only startLoop()/stopLoop() and loop() itself may write to it.
+let animId = null;
+
+function startLoop() {
+  if (animId !== null) return;
+  lastTime = performance.now();
+  animId = requestAnimationFrame(loop);
+}
+
+function stopLoop() {
+  if (animId === null) return;
+  cancelAnimationFrame(animId);
+  animId = null;
+}
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
@@ -195,6 +211,9 @@ function draw() {
     for (let c = 0; c < COLS; c++)
       drawBlock(ctx, c, r, board[r][c], BLOCK);
 
+  // the piece that triggered game over overlaps the stack — don't render it
+  if (gameOver) return;
+
   // ghost
   const gy = ghostY();
   for (let r = 0; r < current.shape.length; r++)
@@ -221,7 +240,8 @@ function drawNext() {
 
 function endGame() {
   gameOver = true;
-  cancelAnimationFrame(animId);
+  stopLoop();
+  draw();
   overlayTitle.textContent = 'GAME OVER';
   overlayScore.textContent = `Puntuación: ${score.toLocaleString()}`;
   overlay.classList.remove('hidden');
@@ -230,18 +250,20 @@ function endGame() {
 function togglePause() {
   if (gameOver) return;
   paused = !paused;
-  if (!paused) {
-    lastTime = performance.now();
-    loop(lastTime);
-  } else {
-    cancelAnimationFrame(animId);
+  if (paused) {
+    stopLoop();
     overlayTitle.textContent = 'PAUSA';
     overlayScore.textContent = '';
     overlay.classList.remove('hidden');
+  } else {
+    overlay.classList.add('hidden');
+    startLoop();
   }
 }
 
 function loop(ts) {
+  animId = null; // this frame already fired; nothing is scheduled right now
+  if (paused || gameOver) return;
   const dt = ts - lastTime;
   lastTime = ts;
   dropAccum += dt;
@@ -253,6 +275,7 @@ function loop(ts) {
       lockPiece();
     }
   }
+  if (gameOver) return; // lockPiece() ended the game; endGame() already painted the final board
   draw();
   animId = requestAnimationFrame(loop);
 }
@@ -271,8 +294,11 @@ function init() {
   spawn();
   updateHUD();
   overlay.classList.add('hidden');
-  cancelAnimationFrame(animId);
-  animId = requestAnimationFrame(loop);
+  // the button keeps DOM focus after a click, and Enter is not preventDefault()ed
+  // by the keydown handler — without this it would re-trigger init() mid-game
+  restartBtn.blur();
+  stopLoop();
+  startLoop();
 }
 
 document.addEventListener('keydown', e => {
