@@ -1,3 +1,48 @@
+# Fix: el juego seguía corriendo detrás del overlay
+
+Síntoma: tras el Game Over las fichas seguían apareciendo y apilándose una sobre otra.
+Eran **dos defectos independientes** que producen el mismo síntoma.
+
+- [x] **A** — `togglePause()` no ocultaba el overlay al reanudar: el único `add('hidden')` estaba
+      en `init()`. Pausar y reanudar dejaba el cartel pegado con el juego corriendo detrás
+      (traslúcido + `blur(4px)`). Explica el "a veces": solo pasaba si habías pausado
+- [x] **B** — `endGame()` no lograba matar el `requestAnimationFrame`. Alcanzado desde dentro de
+      `loop()` (`lockPiece → spawn`), `animId` era el frame *en ejecución*: cancelarlo es un
+      no-op, y `loop()` seguía hasta reagendarse. El juego seguía tickeando tras el final
+- [x] Causa raíz común: no había fuente de verdad para "¿el juego corre?". `animId` lo escribían
+      tres funciones y nunca se ponía a `null`. Ahora `startLoop()`/`stopLoop()` son sus únicos
+      dueños; `loop()` se marca no-agendado al entrar y se niega a reagendarse si `paused || gameOver`
+- [x] Hardening: `restartBtn.blur()` en `init()` — el botón conservaba el foco y `Enter` (que no
+      recibe `preventDefault()`) reiniciaba la partida en medio del juego
+- [x] `CLAUDE.md`: el "Known quirk" se reemplazó por la invariante del ciclo de vida del loop
+
+## Verificación (Playwright MCP sobre `python3 -m http.server`)
+
+Medida contra `HEAD` para probar el delta, no solo que el código compila:
+
+| | `HEAD` (antes) | Arreglado |
+|---|---|---|
+| Tablero 2 s después del Game Over | **2 celdas nuevas** (seguía fusionando piezas) | idéntico |
+| `animId` en el Game Over | frame agendado | `null` |
+| Overlay tras reanudar | **seguía visible** con el juego corriendo | oculto |
+
+- [x] T1 Game Over por tick natural del loop → `gameOver: true`, `animId: null`, tablero idéntico tras 2 s
+- [x] T2 5 ciclos pausa/reanudar → overlay oculto en cada reanudación; 6 filas en 400 ms con
+      `dropInterval=60` ⇒ un solo loop (uno duplicado habría caído ~12)
+- [x] T3 Reiniciar desde Game Over y desde pausa → tablero vacío, score 0, overlay oculto,
+      corriendo; `Enter` ya no reinicia (`document.activeElement !== restartBtn`)
+- [x] T4 No regresión: rotación contra la pared izquierda, soft drop puntúa, hard drop bloquea y
+      spawnea, doble line clear 8→10 líneas, nivel 1→2, `dropInterval` 1000→910, HUD sincronizado
+
+## Review
+
+El parche que había sin commitear (6 líneas) tapaba los dos puntos donde B se manifestaba, pero
+no la causa, y no tocaba A en absoluto. Se conservó su decisión de no dibujar la pieza que topea
+(en el top-out no llegó a fusionarse en `board`, dibujarla la superpondría al stack) y se
+reescribió el resto sobre el ciclo de vida explícito.
+
+---
+
 # Triage automático de issues con Claude
 
 Al crear o editar un issue, Claude lo analiza, le aplica labels de una taxonomía cerrada y
