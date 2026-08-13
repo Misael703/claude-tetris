@@ -107,7 +107,31 @@ jobs:
             Escribe el Markdown en el archivo `diagnosis.md`, empezando EXACTAMENTE con la línea:
               <!-- claude-triage -->
 
-            y con estas secciones en este orden:
+            ### Formato: GitHub Flavored Markdown
+            El archivo se publica tal cual con `--body-file`, así que lo que escribas es
+            exactamente lo que GitHub va a renderizar. No escapes nada para la shell: el
+            contenido no pasa por ella. Reglas para que renderice bien:
+
+            - Usa GFM (GitHub Flavored Markdown), no Markdown genérico ni HTML.
+            - Deja una línea en blanco antes y después de cada encabezado, lista y bloque de
+              código. Sin ella GitHub pega el bloque al párrafo anterior y no lo interpreta.
+            - Un salto de línea simple NO corta la línea al renderizar: dentro de un párrafo
+              GFM une las líneas. Para separar párrafos usa una línea en blanco.
+            - Bloques de código siempre con cerca triple y etiqueta de lenguaje (```js, ```bash).
+              Nunca indentes código con espacios para marcarlo.
+            - Rutas, identificadores y referencias van en código inline con backticks:
+              `game.js:123`, `tryRotate()`, `COLS`. No los conviertas en enlaces.
+            - Nada de HTML crudo salvo la línea del marcador de arriba: GitHub sanitiza casi
+              todas las etiquetas y quedarían visibles o desaparecerían.
+            - Escapa los `<` y `>` sueltos fuera de código (`&lt;`, `&gt;`) o mételos en
+              backticks; si no, GitHub los puede interpretar como etiquetas.
+            - Las tablas de GFM necesitan la fila de separación (`|---|---|`) y no admiten
+              saltos de línea dentro de una celda.
+            - Cuidado con `@usuario` y `#123` en texto plano: GitHub los convierte en menciones
+              y referencias reales, y eso notifica a gente y ensucia otros issues. Si necesitas
+              escribirlos, ponlos en backticks.
+
+            El diagnóstico debe llevar estas secciones en este orden:
 
             ## 🔍 Diagnóstico automático
             **Tipo:** … · **Prioridad:** … · **Área:** … · **Confianza:** alta/media/baja
@@ -132,7 +156,8 @@ jobs:
             ### Criterios de aceptación
             Este proyecto NO tiene tests: la verificación es manual en el navegador. Escríbelos
             como pasos jugables y observables (spawn → rotar contra la pared → line clear →
-            subir de nivel → game over → reiniciar).
+            subir de nivel → game over → reiniciar), y como lista de tareas GFM (`- [ ] …`)
+            para que quien verifique pueda ir tildándolos desde la propia interfaz de GitHub.
 
             ### Riesgos
             Qué se puede romper. Ten presente el quirk de `CLAUDE.md`: `endGame()` llama a
