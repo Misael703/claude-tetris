@@ -1,48 +1,18 @@
 name: Claude Issue Triage
 
 on:
-  # Ejecútalo a mano una vez desde la pestaña Actions para crear la taxonomía.
-  workflow_dispatch:
   issues:
     types: [opened, edited]
 
 # Varias ediciones seguidas apilarían runs que se pisan el mismo comentario.
 # Solo importa el análisis más reciente.
 concurrency:
-  group: triage-issue-${{ github.event.issue.number || 'setup' }}
+  group: triage-issue-${{ github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
-  setup-labels:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_REPO: ${{ github.repository }}
-    steps:
-      - name: Create triage labels
-        run: |
-          set -euo pipefail
-          create() { gh label create "$1" --color "$2" --description "$3" --force; }
-          create "type:bug"          d73a4a "Algo no funciona como debería"
-          create "type:feature"      a2eeef "Funcionalidad nueva o mejora"
-          create "type:question"     d876e3 "Duda o solicitud de información"
-          create "priority:critical" b60205 "El juego es injugable"
-          create "priority:high"     d93f0b "Afecta el flujo principal de juego"
-          create "priority:medium"   fbca04 "Molesto pero con alternativa"
-          create "priority:low"      0e8a16 "Detalle menor o pulido"
-          create "area:gameplay"     1d76db "Loop, colisión, rotación, puntuación"
-          create "area:rendering"    1d76db "Canvas, dibujo, colores, fantasma"
-          create "area:input"        1d76db "Teclado y control de la pieza"
-          create "area:ui"           1d76db "HTML, CSS, overlays y paneles"
-          create "area:docs"         0075ca "README, CLAUDE.md y documentación"
-          create "needs-info"        e4e669 "Falta información para reproducir"
-
   triage:
     if: |
-      github.event_name == 'issues' &&
       github.event.issue.user.type != 'Bot' &&
       !contains(github.event.issue.labels.*.name, 'no-triage')
     runs-on: ubuntu-latest
@@ -64,11 +34,12 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Superficie mínima a propósito: Claude lee texto escrito por cualquiera
-          # de internet Y ejecuta comandos, así que no recibe `gh` entero. Sin
-          # `gh label` no puede inventar labels (GitHub rechaza los que no existen)
-          # y sin `gh api` no tiene un primitivo genérico de escritura sobre el repo.
+          # de internet Y ejecuta comandos, así que no recibe `gh` entero. Tiene
+          # `gh label list` pero no `gh label create`, así que solo puede usar los
+          # labels que ya existen; y sin `gh api` no tiene un primitivo genérico
+          # de escritura sobre el repo.
           claude_args: >-
-            --allowedTools "Read,Grep,Glob,Write,Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*)"
+            --allowedTools "Read,Grep,Glob,Write,Bash(gh label list:*),Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*)"
           prompt: |
             Eres el triage automático de este repo (Tetris en JS vanilla sobre Canvas).
             El issue a analizar es el número ${{ github.event.issue.number }}.
@@ -85,23 +56,35 @@ jobs:
             código y citar líneas concretas (`game.js:123`), no hablar en abstracto.
 
             ## Paso 2 — Etiquetar
-            Lista cerrada, no inventes ninguno (GitHub rechazará los que no existan):
-            - Tipo, EXACTAMENTE uno: type:bug · type:feature · type:question
-            - Prioridad, EXACTAMENTE una: priority:critical (injugable) ·
-              priority:high (rompe el flujo principal) · priority:medium (hay alternativa) ·
-              priority:low (pulido)
-            - Área, cero o más: area:gameplay (loop, colisión, rotación, puntuación) ·
-              area:rendering (canvas, dibujo, fantasma) · area:input (teclado) ·
-              area:ui (HTML/CSS, overlays) · area:docs
-            - needs-info: si falta información imprescindible para reproducir o decidir.
+            Usa ÚNICAMENTE los labels que ya existen en el repositorio. NO inventes ninguno:
+            no puedes crearlos y GitHub rechazará la llamada entera si mencionas uno que no
+            existe, dejando el issue sin etiquetar. Consulta la lista real con:
+              gh label list
+
+            Criterio con los labels estándar de GitHub:
+            - `bug` — algo no funciona como debería.
+            - `enhancement` — funcionalidad nueva o mejora de una existente.
+            - `question` — es una duda, o falta información imprescindible para reproducir
+              o decidir (en ese caso pregunta lo que falta en el diagnóstico).
+            - `documentation` — afecta al README, a CLAUDE.md o a comentarios del código.
+            - `good first issue` — añádelo si el arreglo es acotado, de un solo archivo y no
+              exige entender el loop del juego. Es una señal para gente que llega nueva.
+            - `help wanted` — añádelo si el arreglo necesita una decisión de diseño o
+              conocimiento que el reporte no aporta.
+            - `duplicate`, `invalid`, `wontfix` — no los apliques por tu cuenta. Son juicios
+              que corresponden a una persona; si sospechas uno, dilo en el diagnóstico.
+
+            Elige EXACTAMENTE uno de `bug`, `enhancement`, `question` o `documentation`, y
+            opcionalmente `good first issue` y/o `help wanted`. Si `gh label list` muestra
+            labels adicionales que encajan mejor, úsalos: manda la lista real, no esta guía.
 
             Aplica todo con UNA sola llamada:
               gh issue edit ${{ github.event.issue.number }} --add-label "a" --add-label "b"
 
-            En esa misma llamada RETIRA con --remove-label los labels que el issue ya tenga,
-            que empiecen por type:, priority:, area: o sean needs-info, y que ya no
-            correspondan. No toques ningún otro label: los que no llevan esos prefijos los
-            puso una persona a mano y deben sobrevivir.
+            En esa misma llamada RETIRA con --remove-label los labels de esa misma lista de
+            clasificación que el issue ya tenga y que ya no correspondan (por ejemplo, si
+            estaba como `bug` y en realidad es una pregunta). No toques ningún otro label:
+            los demás los puso una persona a mano y deben sobrevivir.
 
             ## Paso 3 — Publicar el diagnóstico
             Escribe el Markdown en el archivo `diagnosis.md`, empezando EXACTAMENTE con la línea:
@@ -134,7 +117,7 @@ jobs:
             El diagnóstico debe llevar estas secciones en este orden:
 
             ## 🔍 Diagnóstico automático
-            **Tipo:** … · **Prioridad:** … · **Área:** … · **Confianza:** alta/media/baja
+            **Labels:** … · **Confianza:** alta/media/baja
 
             ### Resumen
             Dos o tres frases sobre qué se pide o qué falla.
@@ -185,7 +168,12 @@ jobs:
           if [[ "$found" -gt 1 ]]; then
             echo "::warning::hay $found comentarios de triage; --edit-last no se aplicó"
           fi
-          types=$(gh issue view "$ISSUE_NUMBER" --json labels \
-            --jq '[.labels[].name | select(startswith("type:"))] | length')
-          [[ "$types" -eq 1 ]] || echo "::warning::se esperaba un solo label type:, hay $types"
-          echo "Diagnóstico verificado en #$ISSUE_NUMBER."
+          # Error, no warning: un issue que sale del triage sin un solo label es un
+          # triage fallido, y en verde no lo ve nadie. No comprobamos CUÁLES son
+          # para no duplicar aquí la lista de labels del repo.
+          labels=$(gh issue view "$ISSUE_NUMBER" --json labels --jq '[.labels[].name] | join(", ")')
+          if [[ -z "$labels" ]]; then
+            echo "::error::el issue #$ISSUE_NUMBER quedó sin ningún label"
+            exit 1
+          fi
+          echo "Diagnóstico verificado en #$ISSUE_NUMBER. Labels: $labels"
